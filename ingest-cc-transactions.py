@@ -4,17 +4,45 @@
 
 # COMMAND ----------
 
+# %sh
+# cd /dbfs/FileStore/tables/
+# rm -r StgCcDebitTransactions
+
+# COMMAND ----------
+
 ## Create table if not already there
 from delta.tables import*
+
+
+deltaTablePath = "dbfs:/FileStore/tables/"
+tableName = "StgCcDebitTransactions"
+
+
 DeltaTable.createIfNotExists(spark) \
   .tableName("default.StgCcDebitTransactions") \
   .addColumn("FileName", "STRING") \
   .addColumn("FileTimestamp", "TIMESTAMP") \
   .addColumn("TransactionDt", "DATE") \
+  .addColumn("TransactionTimestamp", "TIMESTAMP") \
   .addColumn("TransactionDescr", "STRING") \
   .addColumn("DebitAmt", "FLOAT") \
+  .location(deltaTablePath + tableName) \
   .execute()
 
+
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC cd /
+# MAGIC cd /dbfs
+# MAGIC cd FileStore
+# MAGIC cd tables
+# MAGIC cd StgCcDebitTransactions
+# MAGIC
+# MAGIC
+# MAGIC ls
+# MAGIC
 
 # COMMAND ----------
 
@@ -52,7 +80,7 @@ DeltaTable.createIfNotExists(spark) \
 # COMMAND ----------
 
 # MAGIC %sh
-# MAGIC # Reset CheckPoint
+# MAGIC # Reset CheckPoint for files
 # MAGIC #ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
 # MAGIC rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
 # MAGIC mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
@@ -89,7 +117,7 @@ accountActivitySchema = StructType([    StructField("TransactionDt", DateType(),
 ##########################################################
 
 accountActivityFileFolder = "dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
-accountActivityCheckPointPath = "dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+accountActivityCheckPointPath = "dbfs:/FileStore/tables/StgCcDebitTransactions/_checkpoint"
 
 
 #b4 using read.load syntax
@@ -102,13 +130,18 @@ accountActivityCheckPointPath = "dbfs:/FileStore/shared_uploads/bolivarc@fordell
 #         "TransactionDescr", \
 #         "DebitAmt")
     
-accountActivityFileStream = spark.readStream.load("dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com", format = "csv", schema = accountActivitySchema, header = False, dateFormat = "MM/dd/yyyy").select( \
-        col("_metadata.file_name").alias("FileName"), \
-        col("_metadata.file_modification_time").alias("FileTimestamp"), \
-        "TransactionDt", \
-        # to_date(col("TransactionDt"),"MM/dd/yyyy").alias("TransactionDt"), \
-        "TransactionDescr", \
-        "DebitAmt").filter("DebitAmt is not null")
+accountActivityFileStream = spark.readStream.load(accountActivityFileFolder, \
+    format = "csv", \
+    schema = accountActivitySchema, \
+    header = False, \
+    dateFormat = "MM/dd/yyyy"). \
+        select( \
+            col("_metadata.file_name").alias("FileName"), \
+            col("_metadata.file_modification_time").alias("FileTimestamp"), \
+            "TransactionDt", \
+            to_timestamp(col("TransactionDt"),"MM/dd/yyyy").alias("TransactionTimestamp"), \
+            "TransactionDescr", \
+            "DebitAmt").filter("DebitAmt is not null")
 
 accountActivityDeltaStream = accountActivityFileStream.writeStream.format("delta").option("checkpointLocation", accountActivityCheckPointPath).toTable("StgCcDebitTransactions")
 
@@ -138,25 +171,34 @@ accountActivityDeltaStream.stop()
 
 # COMMAND ----------
 
+# %sql
+# drop table CcDebitTransactions
+
+# COMMAND ----------
+
+# %sh
+# # remove table directory for CcDebitTransactions
+# rm -r "/dbfs/FileStore/tables/CcDebitTransactions"
+
+# COMMAND ----------
+
 # copy to silver table, removing duplicates
 # for simplicity we assume no transactions on the same day for the same place for the same amount (only good for PoC)
 # Since we only append into STG, there might be duplicates.  Remove them based on TransactionDt, TransactionDescr and DebitAmt
 ## Create table if not already there
 from delta.tables import*
+
+deltaTablePath = "dbfs:/FileStore/tables/"
+tableName = "CcDebitTransactions"
+
 DeltaTable.createIfNotExists(spark) \
   .tableName("default.CcDebitTransactions") \
   .addColumn("TransactionDt", "DATE") \
   .addColumn("TransactionDescr", "STRING") \
   .addColumn("DebitAmt", "FLOAT") \
+  .addColumn("DupCount", "INTEGER") \
+  .location(deltaTablePath + tableName) \
   .execute()
-
-# COMMAND ----------
-
-# MAGIC %sh
-# MAGIC # Create location for checkpoints
-# MAGIC mkdir /Workspace/Shared/delta
-# MAGIC mkdir /Workspace/Shared/delta/CcDebitTransactions
-# MAGIC mkdir /Workspace/Shared/delta/CcDebitTransactions/_checkpoints
 
 # COMMAND ----------
 
@@ -167,6 +209,7 @@ def mergeToCcDebitTransactions(microDf, atchId):
          microDf.alias("s"),
          "s.TransactionDt = t.TransactionDt and s.TransactionDescr = t.TransactionDescr and s.DebitAmt = t.DebitAmt"
      )
+     .whenMatchedUpdateAll()
      .whenNotMatchedInsertAll()
      .execute
      )
@@ -181,20 +224,26 @@ def mergeToCcDebitTransactions(microDf, atchId):
 ccDebitTransactionsStreamIn = spark.readStream.format("delta") \
     .option("withEventTimeOrder", "true") \
     .table("stgccdebittransactions") \
-    .groupBy("TransactionDt", "TransactionDescr", "DebitAmt") \
-    .agg(count("*").alias("DupCount"))
+    .withWatermark("TransactionTimestamp", "5 days") \
+    .groupBy("TransactionDt", "TransactionDescr", "DebitAmt", "TransactionTimestamp") \
+    .agg(count("*").alias("DupCount")) 
+    
 
-HOW DOES IT KNOW THE COLUMN TO USE FOR EventTimeOrder???
-# .withWatermark("TransactionDt", "5 days")
+#HOW DOES IT KNOW THE COLUMN TO USE FOR EventTimeOrder???
 
-# using update instead of append
 # we want to have the most up to date daily transactions, but we know that there are delays in transactions being posted
 # assuming we can have revisions (delays in posting transactions up to 5 days)
-ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn.writeStream.format("delta") \
+ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
+    .select("TransactionDt", "TransactionDescr", "DebitAmt", "DupCount") \
+    .writeStream.format("delta") \
     .outputMode("append") \
-    .option("checkpointLocation", "/Workspace/Shared/delta/CcDebitTransactions/_checkpoints/") \
-    .toTable("CcDebitTransactions") \
-    .foreachBatch(mergeToCcDebitTransactions)
+    .foreachBatch(mergeToCcDebitTransactions) \
+    .option("checkpointLocation", "dbfs:/FileStore/tables/_checkpoint/") \
+    .toTable("CcDebitTransactions") 
+
+
+
+    
 
 
 # COMMAND ----------
@@ -205,8 +254,8 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn.writeStream.format(
 
 # COMMAND ----------
 
-# Stop Stream (because this is a PoC)
-#ccDebitTransactionsDeltaStream.stop();
+# # Stop Stream (because this is a PoC)
+# ccDebitTransactionsDeltaStream.stop();
 
 # COMMAND ----------
 
