@@ -179,8 +179,8 @@ accountActivityDeltaStream = accountActivityFileStream.writeStream.format("delta
 
 # COMMAND ----------
 
-## STOP stream
-accountActivityDeltaStream.stop()
+# ## STOP stream
+# accountActivityDeltaStream.stop()
 
 # COMMAND ----------
 
@@ -272,6 +272,7 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
 # MAGIC -- select * from StgCcDebitTransactions order by 3 desc;
 # MAGIC
 # MAGIC select * from CcDebitTransactions order by 1 desc;
+# MAGIC -- select * from CcDebitTransactions where DebitAmt is null;
 # MAGIC
 # MAGIC -- select max( transactiondt) from CcDebitTransactions; --2023-09-09
 
