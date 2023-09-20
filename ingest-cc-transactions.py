@@ -79,13 +79,21 @@ DeltaTable.createIfNotExists(spark) \
 
 # COMMAND ----------
 
+# %sh
+# # Reset CheckPoint for files
+# #ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# echo "CheckPoint Data removed"
+
+# COMMAND ----------
+
 # MAGIC %sh
-# MAGIC # Reset CheckPoint for files
-# MAGIC #ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# MAGIC rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# MAGIC mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# MAGIC ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# MAGIC echo "CheckPoint Data removed"
+# MAGIC cd "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
+# MAGIC ls
+# MAGIC cat accountactivity_eod_2023_09_17_download_2023_09_18_2.csv
+# MAGIC
 
 # COMMAND ----------
 
@@ -93,7 +101,8 @@ DeltaTable.createIfNotExists(spark) \
 from pyspark.sql.types import*
 from pyspark.sql.functions import*
 
-accountActivitySchema = StructType([    StructField("TransactionDt", DateType(), False),
+# issue with spark so parsing date as string first
+accountActivitySchema = StructType([    StructField("TransactionDt", StringType(), False),
                                         StructField("TransactionDescr", StringType(), False),
                                         StructField("DebitAmt", FloatType(), True),
                                         StructField("CreditAmt", FloatType(), True),
@@ -133,9 +142,9 @@ accountActivityCheckPointPath = "dbfs:/FileStore/tables/StgCcDebitTransactions/_
 accountActivityFileStream = spark.readStream.load(accountActivityFileFolder, \
     format = "csv", \
     schema = accountActivitySchema, \
-    header = False, \
-    dateFormat = "MM/dd/yyyy"). \
-        select( \
+    header = False) \
+        .withColumn("TransactionDt", to_date(col("TransactionDt"), "MM/dd/yyyy")) \
+        .select( \
             col("_metadata.file_name").alias("FileName"), \
             col("_metadata.file_modification_time").alias("FileTimestamp"), \
             "TransactionDt", \
@@ -144,6 +153,8 @@ accountActivityFileStream = spark.readStream.load(accountActivityFileFolder, \
             "DebitAmt").filter("DebitAmt is not null")
 
 accountActivityDeltaStream = accountActivityFileStream.writeStream.format("delta").option("checkpointLocation", accountActivityCheckPointPath).toTable("StgCcDebitTransactions")
+
+
 
 
 
@@ -160,7 +171,9 @@ accountActivityDeltaStream = accountActivityFileStream.writeStream.format("delta
 # MAGIC
 # MAGIC select *
 # MAGIC  from StgCcDebitTransactions  --where DebitAmt is null
-# MAGIC order by transactiondt
+# MAGIC order by transactiondt desc
+# MAGIC
+# MAGIC -- select date_format(date '2023-09-14', "MM/dd/yyyy");
 # MAGIC
 # MAGIC
 
@@ -196,7 +209,7 @@ DeltaTable.createIfNotExists(spark) \
   .addColumn("TransactionDt", "DATE") \
   .addColumn("TransactionDescr", "STRING") \
   .addColumn("DebitAmt", "FLOAT") \
-  .addColumn("DupCount", "INTEGER") \
+  .addColumn("DupCount", "LONG") \
   .location(deltaTablePath + tableName) \
   .execute()
 
@@ -238,18 +251,12 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
     .writeStream.format("delta") \
     .outputMode("append") \
     .foreachBatch(mergeToCcDebitTransactions) \
-    .option("checkpointLocation", "dbfs:/FileStore/tables/_checkpoint/") \
+    .option("checkpointLocation", "dbfs:/FileStore/tables/CcDebitTransactions/_checkpoint/") \
     .toTable("CcDebitTransactions") 
 
 
 
     
-
-
-# COMMAND ----------
-
-
-
 
 
 # COMMAND ----------
@@ -261,6 +268,18 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
 
 # MAGIC %sql
 # MAGIC -- Read staging delta table
-# MAGIC --select count(*) from StgCcDebitTransactions;
-# MAGIC --select * from StgCcDebitTransactions;
-# MAGIC select * from CcDebitTransactions order by 1;
+# MAGIC -- select count(*) from StgCcDebitTransactions;
+# MAGIC -- select * from StgCcDebitTransactions order by 3 desc;
+# MAGIC
+# MAGIC select * from CcDebitTransactions order by 1 desc;
+# MAGIC
+# MAGIC -- select max( transactiondt) from CcDebitTransactions; --2023-09-09
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC cd /dbfs
+# MAGIC cd FileStore
+# MAGIC cd shared_uploads
+# MAGIC cd bolivarc@fordellconsulting.com
+# MAGIC ls
