@@ -97,6 +97,42 @@ DeltaTable.createIfNotExists(spark) \
 
 # COMMAND ----------
 
+# troubleshoot losing dates
+# load to staging table
+from pyspark.sql.types import*
+from pyspark.sql.functions import*
+
+# issue with spark so parsing date as string first
+accountActivitySchema = StructType([    StructField("TransactionDt", StringType(), False),
+                                        StructField("TransactionDescr", StringType(), False),
+                                        StructField("DebitAmt", FloatType(), True),
+                                        StructField("CreditAmt", FloatType(), True),
+                                        StructField("BalanceAmt", FloatType(), False)])
+
+accountActivityFileFolder = "dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
+accountActivityCheckPointPath = "dbfs:/FileStore/tables/StgCcDebitTransactions/_checkpoint"
+
+df = spark.read.load(accountActivityFileFolder, \
+    format = "csv", \
+    schema = accountActivitySchema, \
+    header = False) \
+        .withColumn("TransactionDt", to_date(col("TransactionDt"), "MM/dd/yyyy")) \
+        .select( \
+            col("_metadata.file_name").alias("FileName"), \
+            col("_metadata.file_modification_time").alias("FileTimestamp"), \
+            "TransactionDt", \
+            to_timestamp(col("TransactionDt"),"MM/dd/yyyy").alias("TransactionTimestamp"), \
+            "TransactionDescr", \
+            "DebitAmt").filter("DebitAmt is not null")
+
+# df = spark.createDataFrame([(1,2,3)])
+display(df)
+
+
+
+
+# COMMAND ----------
+
 # load to staging table
 from pyspark.sql.types import*
 from pyspark.sql.functions import*
@@ -152,7 +188,7 @@ accountActivityFileStream = spark.readStream.load(accountActivityFileFolder, \
             "TransactionDescr", \
             "DebitAmt").filter("DebitAmt is not null")
 
-accountActivityDeltaStream = accountActivityFileStream.writeStream.format("delta").option("checkpointLocation", accountActivityCheckPointPath).toTable("StgCcDebitTransactions")
+accountActivityDeltaStream = accountActivityFileStream.writeStream.queryName("write_StgCcDebitTransactions").format("delta").option("checkpointLocation", accountActivityCheckPointPath).toTable("StgCcDebitTransactions")
 
 
 
@@ -249,6 +285,7 @@ ccDebitTransactionsStreamIn = spark.readStream.format("delta") \
 ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
     .select("TransactionDt", "TransactionDescr", "DebitAmt", "DupCount") \
     .writeStream.format("delta") \
+    .queryName("write_CcDebitTransactions") \
     .outputMode("append") \
     .foreachBatch(mergeToCcDebitTransactions) \
     .option("checkpointLocation", "dbfs:/FileStore/tables/CcDebitTransactions/_checkpoint/") \
@@ -274,7 +311,10 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
 # MAGIC select * from CcDebitTransactions order by 1 desc;
 # MAGIC -- select * from CcDebitTransactions where DebitAmt is null;
 # MAGIC
-# MAGIC -- select max( transactiondt) from CcDebitTransactions; --2023-09-09
+# MAGIC -- select max( transactiondt) from StgCcDebitTransactions; --2023-09-19
+# MAGIC
+# MAGIC -- select max( transactiondt) from CcDebitTransactions; --2023-09-14
+# MAGIC
 
 # COMMAND ----------
 
