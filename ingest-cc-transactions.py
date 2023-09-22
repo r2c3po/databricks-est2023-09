@@ -35,13 +35,17 @@
 
 # COMMAND ----------
 
-# %sh
-# # Reset CheckPoint for files
-# #ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# echo "CheckPoint Data removed"
+# MAGIC %sh
+# MAGIC # Reset CheckPoint for files
+# MAGIC
+# MAGIC rm -r "/dbfs/FileStore/tables/CcDebitTransactions/_checkpoint"
+# MAGIC ls -ltr "/dbfs/FileStore/tables/CcDebitTransactions/"
+# MAGIC
+# MAGIC
+# MAGIC # rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# MAGIC # mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# MAGIC # ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# MAGIC # echo "CheckPoint Data removed"
 
 # COMMAND ----------
 
@@ -97,26 +101,6 @@ DeltaTable.createIfNotExists(spark) \
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #UDF
-
-# COMMAND ----------
-
-def mergeToCcDebitTransactions(microDf, atchId):
-    # Remember the micro batch and BatchId get automatically passed we just need to name them
-    (CcDebitTransactions.alias("t")
-     .merge(
-         microDf.alias("s"),
-         "s.TransactionDt = t.TransactionDt and s.TransactionDescr = t.TransactionDescr and s.DebitAmt = t.DebitAmt"
-     )
-     .whenMatchedUpdateAll()
-     .whenNotMatchedInsertAll()
-     .execute
-     )
-
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC #Start Streams
 
 # COMMAND ----------
@@ -138,36 +122,9 @@ accountActivitySchema = StructType([    StructField("TransactionDt", StringType(
                                         StructField("BalanceAmt", FloatType(), False)])
 
 
-#################################################
-# This is START of the the old batch code.
-    # accountActivityDataFile = spark.read.load("dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18_2.csv", format = "csv", schema = accountActivitySchema, header = False, dateFormat = "MM/dd/yyyy").select(col("_metadata.file_name").alias("FileName"),col("_metadata.file_modification_time").alias("FileTimestamp"),"*")
-
-    # display(accountActivityDataFile.limit(5))
-
-    # ccDebitTransactionsDataFile = accountActivityDataFile.select("FileName","FileTimestamp","TransactionDt", "TransactionDescr", "DebitAmt")
-
-    # ccDebitTransactionsDataFile = ccDebitTransactionsDataFile.filter("DebitAmt is not null")
-
-    # display(ccDebitTransactionsDataFile.limit(5))
-
-    # ccDebitTransactionsDataFile.write.format("delta").mode("append").saveAsTable("StgCcDebitTransactions")
-# This is END of the the old batch code.
-##########################################################
-
 accountActivityFileFolder = "dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
 accountActivityCheckPointPath = "dbfs:/FileStore/tables/StgCcDebitTransactions/_checkpoint"
-
-
-#b4 using read.load syntax
-# accountActivityFileStream = spark.readStream.format("csv").schema(accountActivitySchema).option("date_format", "MM/dd/yyyy").load(accountActivityFileFolder). \
-#     select( \
-#         col("_metadata.file_name").alias("FileName"), \
-#         col("_metadata.file_modification_time").alias("FileTimestamp"), \
-#         "TransactionDt", \
-#         # to_date(col("TransactionDt"),"MM/dd/yyyy").alias("TransactionDt"), \
-#         "TransactionDescr", \
-#         "DebitAmt")
-    
+   
 accountActivityFileStream = spark.readStream.load(accountActivityFileFolder, \
     format = "csv", \
     schema = accountActivitySchema, \
@@ -185,10 +142,6 @@ accountActivityDeltaStream = accountActivityFileStream.writeStream.queryName("wr
 
 
 
-
-
-
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -198,8 +151,20 @@ accountActivityDeltaStream = accountActivityFileStream.writeStream.queryName("wr
 
 # Load from STG to "silver" table as a stream
 # Start Stream
-# ccDebitTransactionsStreamIn = spark.readStream.format("delta").load("dbfs:/user/hive/warehouse/stgccdebittransactions")
 
+# Keep the UDF with this command for now, bc if it isnt created the code still runs, but it gives unexpected behaviour
+def mergeToCcDebitTransactions(microDf, BatchId):
+    # Remember the micro batch and BatchId get automatically passed we just need to name them
+    (CcDebitTransactions.alias("t")
+     .merge(
+         microDf.alias("s"),
+         "s.TransactionDt = t.TransactionDt and s.TransactionDescr = t.TransactionDescr and s.DebitAmt = t.DebitAmt"
+     )
+     .whenMatchedUpdateAll()
+     .whenNotMatchedInsertAll()
+     .execute
+     )
+    
 ccDebitTransactionsStreamIn = spark.readStream.format("delta") \
     .option("withEventTimeOrder", "true") \
     .table("stgccdebittransactions") \
@@ -221,9 +186,6 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
     .option("checkpointLocation", "dbfs:/FileStore/tables/CcDebitTransactions/_checkpoint/") \
     .toTable("CcDebitTransactions") 
 
-
-
-    
 
 
 # COMMAND ----------
@@ -332,8 +294,15 @@ display(df)
 # MAGIC
 # MAGIC select *
 # MAGIC  from StgCcDebitTransactions  --where DebitAmt is null
-# MAGIC order by transactiondt desc
+# MAGIC order by 3,4,5 
 # MAGIC
+# MAGIC -- select  date_format(TransactionDt, 'MM/dd/yyyy') as TransactionDt,TransactionDescr,DebitAmt
+# MAGIC --  from StgCcDebitTransactions  --where DebitAmt is null
+# MAGIC -- order by 1,2,3 
+# MAGIC
+# MAGIC -- 206 rows after first file
+# MAGIC -- 360 ( + 154) rows after second file
+# MAGIC -- 510 after 3rd file
 # MAGIC -- select date_format(date '2023-09-14', "MM/dd/yyyy");
 # MAGIC
 # MAGIC
@@ -345,7 +314,12 @@ display(df)
 # MAGIC -- select count(*) from StgCcDebitTransactions;
 # MAGIC -- select * from StgCcDebitTransactions order by 3 desc;
 # MAGIC
-# MAGIC select * from CcDebitTransactions order by 1 desc;
+# MAGIC select * from CcDebitTransactions order by 1,2,3; 
+# MAGIC --164 rows after 1st file
+# MAGIC --164 rows after 2nd file (nothing in the past gets loaded)
+# MAGIC -- 936 rows after rebuilding table
+# MAGIC
+# MAGIC -- select * from CcDebitTransactions where DupCount > 1;
 # MAGIC -- select * from CcDebitTransactions where DebitAmt is null;
 # MAGIC
 # MAGIC -- select max( transactiondt) from StgCcDebitTransactions; --2023-09-19
@@ -360,6 +334,7 @@ display(df)
 # MAGIC cd FileStore
 # MAGIC cd shared_uploads
 # MAGIC cd bolivarc@fordellconsulting.com
+# MAGIC
 # MAGIC ls
 
 # COMMAND ----------
