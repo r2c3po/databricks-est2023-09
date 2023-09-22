@@ -1,4 +1,11 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC #Drop Tables
+# MAGIC * Remove from Catalog
+# MAGIC * Remove dbfs files
+
+# COMMAND ----------
+
 # %sql
 # drop table StgCcDebitTransactions
 
@@ -10,7 +17,43 @@
 
 # COMMAND ----------
 
-## Create table if not already there
+# %sql
+# drop table CcDebitTransactions
+
+# COMMAND ----------
+
+# %sh
+# # remove table directory for CcDebitTransactions
+# rm -r "/dbfs/FileStore/tables/CcDebitTransactions"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #Reset Checkpoints
+# MAGIC * example only
+# MAGIC
+
+# COMMAND ----------
+
+# %sh
+# # Reset CheckPoint for files
+# #ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
+# echo "CheckPoint Data removed"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #Create Tables
+# MAGIC * StgCcDebitTransactions
+# MAGIC * CcDebitTransactions
+# MAGIC
+
+# COMMAND ----------
+
+## Create STG table if not already there
 from delta.tables import*
 
 
@@ -33,103 +76,53 @@ DeltaTable.createIfNotExists(spark) \
 
 # COMMAND ----------
 
-# MAGIC %sh
-# MAGIC cd /
-# MAGIC cd /dbfs
-# MAGIC cd FileStore
-# MAGIC cd tables
-# MAGIC cd StgCcDebitTransactions
-# MAGIC
-# MAGIC
-# MAGIC ls
-# MAGIC
+# Create Silver table
+# for simplicity we assume no transactions on the same day for the same place for the same amount (only good for PoC)
+# Since we only append into STG, there might be duplicates.  Remove them based on TransactionDt, TransactionDescr and DebitAmt
+## Create table if not already there
+from delta.tables import*
+
+deltaTablePath = "dbfs:/FileStore/tables/"
+tableName = "CcDebitTransactions"
+
+DeltaTable.createIfNotExists(spark) \
+  .tableName("default.CcDebitTransactions") \
+  .addColumn("TransactionDt", "DATE") \
+  .addColumn("TransactionDescr", "STRING") \
+  .addColumn("DebitAmt", "FLOAT") \
+  .addColumn("DupCount", "LONG") \
+  .location(deltaTablePath + tableName) \
+  .execute()
 
 # COMMAND ----------
 
-# MAGIC %sh
-# MAGIC ## TESTING copying files
-# MAGIC cd /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com
-# MAGIC ls -l /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com
-# MAGIC #cp /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18.csv /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18_2.csv
-# MAGIC
+# MAGIC %md
+# MAGIC #UDF
 
 # COMMAND ----------
 
-# # TESTING
-# from pyspark.sql.types import*
-# from pyspark.sql.functions import*
-# import os
+def mergeToCcDebitTransactions(microDf, atchId):
+    # Remember the micro batch and BatchId get automatically passed we just need to name them
+    (CcDebitTransactions.alias("t")
+     .merge(
+         microDf.alias("s"),
+         "s.TransactionDt = t.TransactionDt and s.TransactionDescr = t.TransactionDescr and s.DebitAmt = t.DebitAmt"
+     )
+     .whenMatchedUpdateAll()
+     .whenNotMatchedInsertAll()
+     .execute
+     )
 
-# #@fn.udf(StringType())
-# #@udf(returnType=StringType()) 
-# #def getFilename(fullPath):
-# #    #return fullPath.split("/")[-1]
-# #    return os.path.basename(fullPath)
-
-# accountActivitySchema = StructType([StructField("TransactionDt", DateType(), False),
-#                                     StructField("TransactionDescr", StringType(), False),
-#                                     StructField("DebitAmt", FloatType(), True),
-#                                     StructField("CreditAmt", FloatType(), True),
-#                                     StructField("BalanceAmt", FloatType(), False)])
-
-# df = spark.read.load("dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18_2.csv", format = "csv", schema = accountActivitySchema, header = False, dateFormat = "MM/dd/yyyy").select(col("_metadata.file_name").alias("FileName"),col("_metadata.file_modification_time").alias("FileTimestamp"),"*")
-# #.withColumn("FileName", getFilename(input_file_name()) )
-
-# display(df.limit(5))
 
 # COMMAND ----------
 
-# %sh
-# # Reset CheckPoint for files
-# #ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# rm -r "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# mkdir "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# ls -ltr "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/checkpoint"
-# echo "CheckPoint Data removed"
+# MAGIC %md
+# MAGIC #Start Streams
 
 # COMMAND ----------
 
-# MAGIC %sh
-# MAGIC cd "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
-# MAGIC ls
-# MAGIC cat accountactivity_eod_2023_09_17_download_2023_09_18_2.csv
-# MAGIC
-
-# COMMAND ----------
-
-# troubleshoot losing dates
-# load to staging table
-from pyspark.sql.types import*
-from pyspark.sql.functions import*
-
-# issue with spark so parsing date as string first
-accountActivitySchema = StructType([    StructField("TransactionDt", StringType(), False),
-                                        StructField("TransactionDescr", StringType(), False),
-                                        StructField("DebitAmt", FloatType(), True),
-                                        StructField("CreditAmt", FloatType(), True),
-                                        StructField("BalanceAmt", FloatType(), False)])
-
-accountActivityFileFolder = "dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
-accountActivityCheckPointPath = "dbfs:/FileStore/tables/StgCcDebitTransactions/_checkpoint"
-
-df = spark.read.load(accountActivityFileFolder, \
-    format = "csv", \
-    schema = accountActivitySchema, \
-    header = False) \
-        .withColumn("TransactionDt", to_date(col("TransactionDt"), "MM/dd/yyyy")) \
-        .select( \
-            col("_metadata.file_name").alias("FileName"), \
-            col("_metadata.file_modification_time").alias("FileTimestamp"), \
-            "TransactionDt", \
-            to_timestamp(col("TransactionDt"),"MM/dd/yyyy").alias("TransactionTimestamp"), \
-            "TransactionDescr", \
-            "DebitAmt").filter("DebitAmt is not null")
-
-# df = spark.createDataFrame([(1,2,3)])
-display(df)
-
-
-
+# MAGIC %md
+# MAGIC ##Staging/Bronze
 
 # COMMAND ----------
 
@@ -198,71 +191,8 @@ accountActivityDeltaStream = accountActivityFileStream.writeStream.queryName("wr
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- select count(*),transactiondt 
-# MAGIC --  from StgCcDebitTransactions 
-# MAGIC --  --where transactiondt is not null 
-# MAGIC -- group by transactiondt 
-# MAGIC -- order by transactiondt
-# MAGIC
-# MAGIC select *
-# MAGIC  from StgCcDebitTransactions  --where DebitAmt is null
-# MAGIC order by transactiondt desc
-# MAGIC
-# MAGIC -- select date_format(date '2023-09-14', "MM/dd/yyyy");
-# MAGIC
-# MAGIC
-
-# COMMAND ----------
-
-# ## STOP stream
-# accountActivityDeltaStream.stop()
-
-# COMMAND ----------
-
-# %sql
-# drop table CcDebitTransactions
-
-# COMMAND ----------
-
-# %sh
-# # remove table directory for CcDebitTransactions
-# rm -r "/dbfs/FileStore/tables/CcDebitTransactions"
-
-# COMMAND ----------
-
-# copy to silver table, removing duplicates
-# for simplicity we assume no transactions on the same day for the same place for the same amount (only good for PoC)
-# Since we only append into STG, there might be duplicates.  Remove them based on TransactionDt, TransactionDescr and DebitAmt
-## Create table if not already there
-from delta.tables import*
-
-deltaTablePath = "dbfs:/FileStore/tables/"
-tableName = "CcDebitTransactions"
-
-DeltaTable.createIfNotExists(spark) \
-  .tableName("default.CcDebitTransactions") \
-  .addColumn("TransactionDt", "DATE") \
-  .addColumn("TransactionDescr", "STRING") \
-  .addColumn("DebitAmt", "FLOAT") \
-  .addColumn("DupCount", "LONG") \
-  .location(deltaTablePath + tableName) \
-  .execute()
-
-# COMMAND ----------
-
-def mergeToCcDebitTransactions(microDf, atchId):
-    # Remember the micro batch and BatchId get automatically passed we just need to name them
-    (CcDebitTransactions.alias("t")
-     .merge(
-         microDf.alias("s"),
-         "s.TransactionDt = t.TransactionDt and s.TransactionDescr = t.TransactionDescr and s.DebitAmt = t.DebitAmt"
-     )
-     .whenMatchedUpdateAll()
-     .whenNotMatchedInsertAll()
-     .execute
-     )
-
+# MAGIC %md
+# MAGIC ##Silver
 
 # COMMAND ----------
 
@@ -298,8 +228,115 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
 
 # COMMAND ----------
 
-# # Stop Stream (because this is a PoC)
-# ccDebitTransactionsDeltaStream.stop();
+# MAGIC %md
+# MAGIC #Testing and Exploring
+
+# COMMAND ----------
+
+# # TESTING
+# from pyspark.sql.types import*
+# from pyspark.sql.functions import*
+# import os
+
+# #@fn.udf(StringType())
+# #@udf(returnType=StringType()) 
+# #def getFilename(fullPath):
+# #    #return fullPath.split("/")[-1]
+# #    return os.path.basename(fullPath)
+
+# accountActivitySchema = StructType([StructField("TransactionDt", DateType(), False),
+#                                     StructField("TransactionDescr", StringType(), False),
+#                                     StructField("DebitAmt", FloatType(), True),
+#                                     StructField("CreditAmt", FloatType(), True),
+#                                     StructField("BalanceAmt", FloatType(), False)])
+
+# df = spark.read.load("dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18_2.csv", format = "csv", schema = accountActivitySchema, header = False, dateFormat = "MM/dd/yyyy").select(col("_metadata.file_name").alias("FileName"),col("_metadata.file_modification_time").alias("FileTimestamp"),"*")
+# #.withColumn("FileName", getFilename(input_file_name()) )
+
+# display(df.limit(5))
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC cd /
+# MAGIC cd /dbfs
+# MAGIC cd FileStore
+# MAGIC cd tables
+# MAGIC cd StgCcDebitTransactions
+# MAGIC
+# MAGIC
+# MAGIC ls
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC ## TESTING copying files
+# MAGIC cd /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com
+# MAGIC ls -l /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com
+# MAGIC #cp /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18.csv /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18_2.csv
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC cd "/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
+# MAGIC ls
+# MAGIC cat accountactivity_eod_2023_09_17_download_2023_09_18_2.csv
+# MAGIC
+
+# COMMAND ----------
+
+# troubleshoot losing dates
+# load to staging table
+from pyspark.sql.types import*
+from pyspark.sql.functions import*
+
+# issue with spark so parsing date as string first
+accountActivitySchema = StructType([    StructField("TransactionDt", StringType(), False),
+                                        StructField("TransactionDescr", StringType(), False),
+                                        StructField("DebitAmt", FloatType(), True),
+                                        StructField("CreditAmt", FloatType(), True),
+                                        StructField("BalanceAmt", FloatType(), False)])
+
+accountActivityFileFolder = "dbfs:/FileStore/shared_uploads/bolivarc@fordellconsulting.com"
+accountActivityCheckPointPath = "dbfs:/FileStore/tables/StgCcDebitTransactions/_checkpoint"
+
+df = spark.read.load(accountActivityFileFolder, \
+    format = "csv", \
+    schema = accountActivitySchema, \
+    header = False) \
+        .withColumn("TransactionDt", to_date(col("TransactionDt"), "MM/dd/yyyy")) \
+        .select( \
+            col("_metadata.file_name").alias("FileName"), \
+            col("_metadata.file_modification_time").alias("FileTimestamp"), \
+            "TransactionDt", \
+            to_timestamp(col("TransactionDt"),"MM/dd/yyyy").alias("TransactionTimestamp"), \
+            "TransactionDescr", \
+            "DebitAmt").filter("DebitAmt is not null")
+
+# df = spark.createDataFrame([(1,2,3)])
+display(df)
+
+
+
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- select count(*),transactiondt 
+# MAGIC --  from StgCcDebitTransactions 
+# MAGIC --  --where transactiondt is not null 
+# MAGIC -- group by transactiondt 
+# MAGIC -- order by transactiondt
+# MAGIC
+# MAGIC select *
+# MAGIC  from StgCcDebitTransactions  --where DebitAmt is null
+# MAGIC order by transactiondt desc
+# MAGIC
+# MAGIC -- select date_format(date '2023-09-14', "MM/dd/yyyy");
+# MAGIC
+# MAGIC
 
 # COMMAND ----------
 
@@ -324,3 +361,18 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
 # MAGIC cd shared_uploads
 # MAGIC cd bolivarc@fordellconsulting.com
 # MAGIC ls
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC #Stop Streams
+
+# COMMAND ----------
+
+# ## STOP stream
+# accountActivityDeltaStream.stop()
+
+# COMMAND ----------
+
+# # Stop Stream (because this is a PoC)
+# ccDebitTransactionsDeltaStream.stop();
