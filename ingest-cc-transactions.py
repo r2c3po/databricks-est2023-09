@@ -6,6 +6,13 @@
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC delete from  StgCcDebitTransactions;
+# MAGIC delete from CcDebitTransactions;
+# MAGIC delete from CcDebitTransactions_NoDelay;
+
+# COMMAND ----------
+
 # %sql
 # drop table StgCcDebitTransactions
 
@@ -25,6 +32,17 @@
 # %sh
 # # remove table directory for CcDebitTransactions
 # rm -r "/dbfs/FileStore/tables/CcDebitTransactions"
+
+# COMMAND ----------
+
+# %sql
+# drop table CcDebitTransactions_NoDelay
+
+# COMMAND ----------
+
+# %sh
+# # remove table directory for CcDebitTransactions
+# rm -r "/dbfs/FileStore/tables/CcDebitTransactions_NoDelay"
 
 # COMMAND ----------
 
@@ -100,6 +118,22 @@ DeltaTable.createIfNotExists(spark) \
 
 # COMMAND ----------
 
+from delta.tables import*
+
+deltaTablePath = "dbfs:/FileStore/tables/"
+tableName = "CcDebitTransactions_NoDelay"
+
+DeltaTable.createIfNotExists(spark) \
+  .tableName("default.CcDebitTransactions_NoDelay") \
+  .addColumn("TransactionDt", "DATE") \
+  .addColumn("TransactionDescr", "STRING") \
+  .addColumn("DebitAmt", "FLOAT") \
+  .addColumn("DupCount", "LONG") \
+  .location(deltaTablePath + tableName) \
+  .execute()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #Start Streams
 
@@ -149,6 +183,11 @@ accountActivityDeltaStream = accountActivityFileStream.writeStream.queryName("wr
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## CcDebitTransactions
+
+# COMMAND ----------
+
 # Load from STG to "silver" table as a stream
 # Start Stream
 
@@ -170,14 +209,18 @@ ccDebitTransactionsStreamIn = spark.readStream.format("delta") \
     .table("stgccdebittransactions") \
     .withWatermark("TransactionTimestamp", "5 days") \
     .groupBy("TransactionDt", "TransactionDescr", "DebitAmt", "TransactionTimestamp") \
-    .agg(count("*").alias("DupCount")) 
+    .agg(count("*").alias("DupCount")) \
+    .createOrReplaceTempView("stgccdebittransactions_tmp_vw")
     
 
 #HOW DOES IT KNOW THE COLUMN TO USE FOR EventTimeOrder???
 
 # we want to have the most up to date daily transactions, but we know that there are delays in transactions being posted
 # assuming we can have revisions (delays in posting transactions up to 5 days)
-ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
+# 
+    # ccDebitTransactionsStreamIn \
+ccDebitTransactionsDeltaStream = \
+    spark.table("stgccdebittransactions_tmp_vw") \
     .select("TransactionDt", "TransactionDescr", "DebitAmt", "DupCount") \
     .writeStream.format("delta") \
     .queryName("write_CcDebitTransactions") \
@@ -185,6 +228,69 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
     .foreachBatch(mergeToCcDebitTransactions) \
     .option("checkpointLocation", "dbfs:/FileStore/tables/CcDebitTransactions/_checkpoint/") \
     .toTable("CcDebitTransactions") 
+    # .start()
+    
+
+
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from stgccdebittransactions_tmp_vw;
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## CcDebitTransactions_NoDelay
+
+# COMMAND ----------
+
+# Load from STG to "silver" table as a stream
+# Start Stream
+# Is this efficient?   The output mode is complete, so does that mean it's running and aggregate for each record?
+
+# Keep the UDF with this command for now, bc if it isnt created the code still runs, but it gives unexpected behaviour
+def mergeToCcDebitTransactionsNoDelay(microDf, BatchId):
+    # Remember the micro batch and BatchId get automatically passed we just need to name them
+    (CcDebitTransactions_NoDelay.alias("t")
+     .merge(
+         microDf.alias("s"),
+         "s.TransactionDt = t.TransactionDt and s.TransactionDescr = t.TransactionDescr and s.DebitAmt = t.DebitAmt"
+     )
+     .whenMatchedUpdateAll()
+     .whenNotMatchedInsertAll()
+     .execute
+     )
+    
+ccDebitTransactionsStreamInNoDelay = spark.readStream.format("delta") \
+    .table("stgccdebittransactions") \
+    .groupBy("TransactionDt", "TransactionDescr", "DebitAmt", "TransactionTimestamp") \
+    .agg(count("*").alias("DupCount")) \
+    .createOrReplaceTempView("stgccdebittransactions_nodelay_tmp_vw")    
+    # .option("withEventTimeOrder", "true") \
+    # .table("stgccdebittransactions") \
+    # .createOrReplaceTempView("stgccdebittransactions_nodelay_tmp_vw")
+
+
+    
+
+#HOW DOES IT KNOW THE COLUMN TO USE FOR EventTimeOrder???
+
+# we want to have the most up to date daily transactions, but we know that there are delays in transactions being posted
+# assuming we can have revisions (delays in posting transactions up to 5 days)
+# 
+    # ccDebitTransactionsStreamIn \
+ccDebitTransactionsDeltaStreamNoDelay = \
+    spark.table("stgccdebittransactions_nodelay_tmp_vw") \
+    .select("TransactionDt", "TransactionDescr", "DebitAmt","DupCount") \
+    .writeStream.format("delta") \
+    .queryName("write_CcDebitTransactions_NoDelay") \
+    .outputMode("complete") \
+    .foreachBatch(mergeToCcDebitTransactionsNoDelay) \
+    .option("checkpointLocation", "dbfs:/FileStore/tables/CcDebitTransactions_NoDelay/_checkpoint/") \
+    .toTable("CcDebitTransactions_NoDelay") 
+    # .start()
+    
 
 
 
@@ -237,6 +343,8 @@ ccDebitTransactionsDeltaStream = ccDebitTransactionsStreamIn \
 # MAGIC cd /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com
 # MAGIC ls -l /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com
 # MAGIC #cp /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18.csv /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/accountactivity_eod_2023_09_17_download_2023_09_18_2.csv
+# MAGIC cat accountactivity_Feb_28_2023___Mar_27_2023.csv
+# MAGIC # rm accountactivity_Feb_28_2023___Mar_27_2023.csv
 # MAGIC
 
 # COMMAND ----------
@@ -351,3 +459,10 @@ display(df)
 
 # # Stop Stream (because this is a PoC)
 # ccDebitTransactionsDeltaStream.stop();
+
+# COMMAND ----------
+
+for s in spark.streams.active:
+    print("Stopping stream: " + s.id)
+    s.stop()
+    s.awaitTermination()
