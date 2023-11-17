@@ -1,0 +1,2 @@
+-- Databricks notebook source
+-- drop table cdc_streaming.cc_category_dim ;
