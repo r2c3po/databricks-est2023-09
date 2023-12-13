@@ -1,7 +1,7 @@
 # Databricks notebook source
-dbutils.widgets.text("schema_name","cdc_streaming")
-dbutils.widgets.text("src_table_name","cc_category")
-dbutils.widgets.text("trg_table_name","cc_category_dim")
+# dbutils.widgets.text("schema_name","cdc_streaming")
+# dbutils.widgets.text("src_table_name","cc_category")
+# dbutils.widgets.text("trg_table_name","cc_category_dim")
 
 # COMMAND ----------
 
@@ -14,6 +14,7 @@ TRG_TBL_NAME = dbutils.widgets.get("trg_table_name")
 src_df = spark.read.format("delta") \
     .table(SCHEMA_NAME + "." + SRC_TBL_NAME)
 
+# get all the columns that do not start with md_ (exclude metadata columns)
 src_cols = src_df.select([column for column in src_df.columns if not(column.startswith("md_"))])
 
 # schema = StructType([StructField('SignalType', StringType()),StructField('StartTime', TimestampType())])

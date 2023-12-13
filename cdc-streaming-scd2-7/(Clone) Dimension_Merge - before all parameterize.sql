@@ -1,6 +1,5 @@
 -- Databricks notebook source
--- drop table cdc_streaming.cc_category_dim ;
--- create table cdc_streaming.cc_category_dim (
+-- create table if not exists cdc_streaming.cc_category_dim (
 --   md_skey bigint,
 --   md_dkey bigint,
 --   trxn_desc string,
@@ -15,24 +14,31 @@
 
 -- COMMAND ----------
 
+-- %python
+-- dbutils.widgets.removeAll()
+-- dbutils.widgets.text("test_var","trxn_desc as testing")
+
+-- COMMAND ----------
+
 WITH 
 
--- get most current snapshot of source data for full compare
 src_AgeRank as(
-select 
-   md_id,
-   trxn_desc,
-   trxn_Category,
-  --  ROW_NUMBER() OVER(PARTITION BY trxn_desc ORDER BY md_file_ts DESC) AS AgeRank,
-   md_file_name,
-   md_file_ts,
-   xxhash64(trxn_desc, trxn_Category) hsh
- from cdc_streaming.cc_category
- where md_file_ts = (select  max(md_file_ts) from cdc_streaming.cc_category) -- latest file
+  select 
+        md_id,
+        ${source_column_list},
+        -- trxn_desc,
+        -- trxn_Category,
+        --  ROW_NUMBER() OVER(PARTITION BY trxn_desc ORDER BY md_file_ts DESC) AS AgeRank,
+        md_file_name,
+        md_file_ts,
+        xxhash64(${source_column_list}) hsh
+  from  
+        cdc_streaming.cc_category
+  where 
+        md_file_ts = (select  max(md_file_ts) from cdc_streaming.cc_category) -- latest file
  ),
 
--- get most recent snapshot of target data for full compare
- trg_DIM as (
+trg_DIM as (
   select
         md_skey,
         md_dkey,
@@ -42,13 +48,13 @@ select
         md_file_ts,
         md_curr_ind,
         xxhash64(trxn_desc, trxn_Category) hsh
-  from cdc_streaming.cc_category_dim
-  where md_curr_ind = 1 
+  from  
+        cdc_streaming.cc_category_dim
+  where 
+        md_curr_ind = 1 
  )
 
--- merge from a query result joining both snapshots (newest snapshot and most recent from target data), 
--- so we can have metadata columns from most recent target records to use in our logic
- MERGE into cdc_streaming.cc_category_dim as trg
+MERGE into cdc_streaming.cc_category_dim as trg
  using
   ( 
       select 
@@ -108,10 +114,9 @@ WHEN MATCHED AND src.new_hsh <> src.old_hsh THEN
 
 
 WHEN NOT MATCHED by TARGET THEN 
--- insert bc a new key is introduced in the new snapshot or there is a change and we need a new version of the record
--- if the record is new (old_md_dkey is null) then skey and dkey are the same since is is a start of a new lineage for this business key
--- if the the data for this business key has changed, then dkey is set to previous dkey.  This keeps the lineage of the changes linked by dkey
--- This is done with the NVL
+-- insert bc a new key is introduced in the new snapshot or there is a change  
+-- if the record is new (old_md_dkey is null) then skey and dkey are the same since is is a start of a new lineage for this key
+-- if the record is an update, then dkey is set to previous dkey.  This is done with the NVL
   insert (
     md_skey    , md_dkey                     , trxn_desc    , trxn_Category    , md_file_name    , md_file_ts    , md_curr_ind, md_start_ts   , md_end_ts
     )
@@ -120,10 +125,7 @@ WHEN NOT MATCHED by TARGET THEN
     )
 
 
-WHEN NOT MATCHED by SOURCE and trg.md_curr_ind = true THEN 
--- expire bc the business key in the old snapshot does not exist in the new snapshot.  This means the lineage has ended.
--- NOTE  TODO this is likely not be desired.  expiring it would make all the fact data disapear from reporting.
--- It's probably better to leave the record active and expire it if there are never any fact records linked to it as a clean up activity
+WHEN NOT MATCHED by SOURCE and trg.md_curr_ind = true THEN -- expire bc the key does not exist in the new snapshot
   update set
     md_curr_ind = false,
     md_end_ts = current_timestamp -- TODO replace with a passed parameter harvested from the data.  in this case we have the file timestamp of the new snapshot, maybe workflow metadata? 
