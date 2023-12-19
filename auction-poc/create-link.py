@@ -12,11 +12,12 @@ dbutils.widgets.text("mapping_xl_name","TestDataMappings.xlsx")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #Create Hub Tables for Line of Business (LOB_ID)
+# MAGIC #Create Link Tables for Line of Business (LOB_ID)
 
 # COMMAND ----------
 
 import pandas as pd
+import re
 from pyspark.sql.types import*
 from delta.tables import*
 
@@ -29,7 +30,8 @@ mapping_xl = dbutils.widgets.get("mapping_xl_name")
 mapping =  pd.read_excel(mapping_loc + "/" + mapping_xl)
 
 # Get list of TRG Tables by SRC_LOB
-table_list = (mapping.query('SRC_LOB == "' + src_lob + '" and TRG_TABLE_TYPE == "HUB"')[["TRG_TABLE"]])["TRG_TABLE"].unique().tolist()
+table_list = (mapping.query('SRC_LOB == "' + src_lob + '" and TRG_TABLE_TYPE == "LINK"')[["TRG_TABLE"]])["TRG_TABLE"].unique().tolist()
+
 
 
 # For each table
@@ -37,29 +39,24 @@ for trg_table in table_list:
     print()
     print("Target Table: " + trg_table)
     
-    root_name = trg_table.lstrip("H_")
+    root_name = trg_table.lstrip("L_")
     print("Root Name: " + root_name)
 
-    # Get list of bus keys in proper order
-    keys_df = mapping.sort_values("BUSKEY_ORDER").query(
+    # Get the two tables that are being linked
+    linktbls_list = mapping.sort_values("LINK_KEY_ORDER").query(
         'TRG_TABLE == "' + trg_table + \
-        '" and IS_BUSKEY == True and TRG_TABLE_TYPE == "HUB"') \
-        [["TRG_COL","TRG_TYPE","TRG_NULLABLE"]]
-    keys_list = keys_df.values.tolist()
-    print(trg_table + " Keylist:")
-    print(keys_list)
+        '" and TRG_TABLE_TYPE == "LINK"') \
+        ["LINK_REF_TABLE"].tolist()
 
-    # create the schema for bus key columns - Only Keys used in HUBs
-    cols=[]
-    for x in keys_list:
-        cols.append({'metadata':{},'name':x[0],'type':x[1],'nullable':x[2]})
-    trg_schema_struct = StructType.fromJson({'fields':cols,'type':'struct'})
-    print(trg_schema_struct)
+    # Links are only made bewteen HUBs so we assume to remove "H_"
+    ref_1_root_name = linktbls_list[0].lstrip("H_")
+    ref_2_root_name = linktbls_list[1].lstrip("H_")
 
     DeltaTable.createIfNotExists(spark) \
     .tableName(trg_schema + "." + trg_table) \
     .addColumn("HK_" + root_name + "_ID", "bigint") \
-    .addColumns(trg_schema_struct) \
+    .addColumn("HK_" + ref_1_root_name + "_ID", "bigint") \
+    .addColumn("HK_" + ref_2_root_name + "_ID", "bigint") \
     .addColumn("LOB_ID", "string") \
     .addColumn("MD_REC_SRC", "string") \
     .addColumn("MD_REC_SRC_ID", "string") \
@@ -80,6 +77,6 @@ for trg_table in table_list:
 # COMMAND ----------
 
 # %sql
-# drop table auction_poc.H_ORGANIZATION;
-# drop table auction_poc.H_INSTRUMENT;
+# drop table auction_poc.L_ELIGIBILITY;
+
 
