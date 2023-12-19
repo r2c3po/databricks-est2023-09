@@ -64,6 +64,7 @@ job_run_id = dbutils.widgets.get('job_run_id')
 task_run_id = dbutils.widgets.get('task_run_id')
 # spark.sql(f"drop table if exists {table_name}")
 spark.sql(f"create table if not exists {table_name}")
+#TODO change current_timestamp to GMT
 spark.sql(f"copy into {table_name} from \
           ( \
             select \
@@ -71,7 +72,7 @@ spark.sql(f"copy into {table_name} from \
               *, \
               _metadata.file_name as md_file_name, \
               _metadata.file_modification_time as md_file_ts, \
-              current_timestamp as md_audit_create_ts, \
+              current_timestamp as md_audit_create_ts, \ 
               cast({job_run_id} as BIGINT) as md_job_run_id, \
               cast({task_run_id} as BIGINT) as md_task_run_id \
             from \
