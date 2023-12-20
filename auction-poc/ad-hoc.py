@@ -115,3 +115,8 @@
 # MAGIC cd /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/auction_poc
 # MAGIC # rm TestDataMappings.xlsx
 # MAGIC ls
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from auction_poc.h_auction_type

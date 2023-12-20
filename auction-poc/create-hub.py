@@ -17,6 +17,7 @@ dbutils.widgets.text("mapping_xl_name","TestDataMappings.xlsx")
 # COMMAND ----------
 
 import pandas as pd
+import numpy as np
 from pyspark.sql.types import*
 from delta.tables import*
 
@@ -26,7 +27,7 @@ mapping_loc = dbutils.widgets.get("mapping_directory")
 mapping_xl = dbutils.widgets.get("mapping_xl_name")
 
 # Reading Mapping
-mapping =  pd.read_excel(mapping_loc + "/" + mapping_xl)
+mapping =  pd.read_excel(mapping_loc + "/" + mapping_xl,dtype={'TRG_NULLABLE': np.bool_, 'IS_BUSKEY': np.bool_})
 
 # Get list of TRG Tables by SRC_LOB
 table_list = (mapping.query('SRC_LOB == "' + src_lob + '" and TRG_TABLE_TYPE == "HUB"')[["TRG_TABLE"]])["TRG_TABLE"].unique().tolist()
@@ -71,6 +72,10 @@ for trg_table in table_list:
 
 
 
+
+# COMMAND ----------
+
+display(mapping)
 
 # COMMAND ----------
 
