@@ -8,7 +8,7 @@ dbutils.widgets.text("src_lob_id","AUCTION")
 dbutils.widgets.text("trg_schema_name","auction_poc")
 dbutils.widgets.text("src_schema_name","auction_poc")
 dbutils.widgets.text("mapping_directory","/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/auction_poc")
-dbutils.widgets.text("mapping_xl_name","TestDataMappings.xlsx")
+dbutils.widgets.text("mapping_xl_name","AuctionDataMappings.xlsx")
 
 dbutils.widgets.text("job_run_id","")
 dbutils.widgets.text("task_run_id","")
@@ -105,9 +105,15 @@ for trg_table in table_list:
         #                                                         ' and TRG_TABLE == "' + trg_table + \
         #                                                         '" and IS_BUSKEY == True') \
         #                                                         ["SRC_COL"]
+        pk_src_keys_list = trg_to_src_df["SRC_COL"].values.tolist()
         ref_1_src_keys_list = trg_to_src_df.query(f"LINK_REF_TABLE == '{ref_1_tbl_name}'")["SRC_COL"].values.tolist()
         ref_2_src_keys_list = trg_to_src_df.query(f"LINK_REF_TABLE == '{ref_2_tbl_name}'")["SRC_COL"].values.tolist()
-        # src_keys_df.values.tolist()
+        
+        print(src_table + " SrcKeylist:")
+        print(pk_src_keys_list)
+        pk_src_key_cols =', '.join(pk_src_keys_list)
+        
+        
         print(ref_1_tbl_name + " SrcKeylist:")
         print(ref_1_src_keys_list)
         ref_1_src_key_cols = ', '.join(ref_1_src_keys_list)
@@ -117,61 +123,83 @@ for trg_table in table_list:
         ref_2_src_key_cols = ', '.join(ref_2_src_keys_list)
 
         # Source Keys with src prefix
-        ref_1_src_keys_scoped_list = ["src."+x for x in src_keys_list]
+        pk_src_keys_scoped_list = ["src."+x for x in pk_src_keys_list]
+        pk_src_keys_scoped_cols = ', '.join(pk_src_keys_scoped_list)
+
+
+        ref_1_src_keys_scoped_list = ["src."+x for x in ref_1_src_keys_list]
         ref_1_src_keys_scoped_cols = ', '.join(ref_1_src_keys_scoped_list)
 
-        ref_2_src_keys_scoped_list = ["src."+x for x in src_keys_list]
+        ref_2_src_keys_scoped_list = ["src."+x for x in ref_2_src_keys_list]
         ref_2_src_keys_scoped_cols = ', '.join(ref_2_src_keys_scoped_list)
   
         # HK column name
-        hk_col = "HK_" + root_name + "_ID"
+        pk_hk_col = "HK_" + root_name + "_ID"
         ref_1_hk_col = "HK_" + ref_1_root_name + "_ID"
         ref_2_hk_col = "HK_" + ref_2_root_name + "_ID"
 
-#TODO is the main hk_select a Hash of the two hashes ???
 
+        # HK select clause with src_lob for multi-system uniqueness
+        pk_hk_select = "xxhash64(" + pk_src_key_cols + ",'" + src_lob + "') as " + pk_hk_col
+        pk_hk_src_value = "xxhash64(" + pk_src_keys_scoped_cols + ",'" + src_lob + "')"
 
+        ref_1_hk_select = "xxhash64(" + ref_1_src_key_cols + ",'" + src_lob + "') as " + ref_1_hk_col
+        ref_1_hk_src_value = "xxhash64(" + ref_1_src_keys_scoped_cols + ",'" + src_lob + "')"
 
+        ref_2_hk_select = "xxhash64(" + ref_2_src_key_cols + ",'" + src_lob + "') as " + ref_2_hk_col
+        ref_2_hk_src_value = "xxhash64(" + ref_2_src_keys_scoped_cols + ",'" + src_lob + "')"
 
-
-        # # HK select clause with src_lob for multi-system uniqueness
-        # hk_select = "xxhash64(" + src_key_cols + ",'" + src_lob + "') as " + hk_col
-        # hk_src_value = "xxhash64(" + src_keys_scoped_cols + ",'" + src_lob + "')"
-
-        # # Build the target to source mapping dictionary
-        # mapping_dict = {hk_col : hk_src_value}
+        # Build the target to source mapping dictionary
+        mapping_dict = {pk_hk_col : pk_hk_src_value}
+        mapping_dict[f'{ref_1_hk_col}'] = f'{ref_1_hk_src_value}'
+        mapping_dict[f'{ref_2_hk_col}'] = f'{ref_2_hk_src_value}'
+     
         # for x in src2trg_cols_list:
         #     mapping_dict[x[1]] = "src." + x[0] 
-        # mapping_dict["LOB_ID"] = "'" + src_lob + "'"
-        # mapping_dict["MD_REC_SRC"] = "'" + src_table + "'"
-        # mapping_dict["MD_REC_SRC_ID"] = "src.MD_REC_SRC_ID"
-        # mapping_dict["MD_LOAD_DTS"] = '"' + dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + '"'
-        # mapping_dict["MD_JOB_RUN_ID"] = "'" + job_run_id + "'"
-        # mapping_dict["MD_TASK_RUN_ID"] = "'" + task_run_id + "'"
-        # print(trg_table + " Mapping Dictionary:")
-        # print(mapping_dict)
+        mapping_dict["LOB_ID"] = "'" + src_lob + "'"
+        mapping_dict["MD_REC_SRC"] = "'" + src_table + "'"
+        mapping_dict["MD_REC_SRC_ID"] = "src.MD_REC_SRC_ID"
+        mapping_dict["MD_LOAD_DTS"] = '"' + dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + '"'
+        mapping_dict["MD_JOB_RUN_ID"] = "'" + job_run_id + "'"
+        mapping_dict["MD_TASK_RUN_ID"] = "'" + task_run_id + "'"
+        print(trg_table + " Mapping Dictionary:")
+        print(mapping_dict)
 
-        # # Select for the source data using mapping for aliasing the column names
-        # # NOTE the MD_REC_SRC_ID must take the first one, since it will break the uniquness of the key in teh case when there are two identical keys
-        # select_stmt = "with source as (" +\
-        #                 "select distinct " + hk_select + ", " + src_select_str + \
-        #                 " ," + "first(source.md_id) OVER (PARTITION BY " + src_key_cols + " ORDER BY md_audit_create_ts) as MD_REC_SRC_ID" +\
-        #                 " from " + src_schema + "." + src_table + " as source"  +\
-        #              ")" +\
-        #              "select * from source where NOT EXISTS " +\
-        #              "(select * from " + trg_schema + "." + trg_table + " as hub where hub."+ hk_col +" = source." + hk_col + ")"
-        # print()
-        # print("Source Select Statement: " + select_stmt)
+        # Select for the source data using mapping for aliasing the column names
+        # NOTE the MD_REC_SRC_ID must take the first one, since it will break the uniquness of the key in teh case when there are two identical keys
+        select_stmt = "with source as (" +\
+                        "select distinct " + pk_hk_select + ", " + pk_src_key_cols +\
+                        " ," + "first(source.md_id) OVER (PARTITION BY " + pk_src_key_cols + " ORDER BY md_audit_create_ts) as MD_REC_SRC_ID" +\
+                        " from " + src_schema + "." + src_table + " as source"  +\
+                     ")" +\
+                     "select * from source where NOT EXISTS " +\
+                     "(select * from " + trg_schema + "." + trg_table + " as hub where hub."+ pk_hk_col +" = source." + pk_hk_col + ")"
+        print()
+        print("Source Select Statement: " + select_stmt)
 
 
-        # #Run Merge with insert only
-        # tgt_delta = DeltaTable.forName(spark,trg_schema + "." + trg_table)
-        # src_df = spark.sql(select_stmt)
+        #Run Merge with insert only
+        tgt_delta = DeltaTable.forName(spark,trg_schema + "." + trg_table)
+        src_df = spark.sql(select_stmt)
 
-        # tgt_delta.alias('tgt').merge( 
-        #     src_df.alias('src'),
-        #     'tgt.' + hk_col + ' = src.' + hk_col 
-        #     ) \
-        #     .whenNotMatchedInsert(values = mapping_dict) \
-        #     .execute()
+        tgt_delta.alias('tgt').merge( 
+            src_df.alias('src'),
+            'tgt.' + pk_hk_col + ' = src.' + pk_hk_col 
+            ) \
+            .whenNotMatchedInsert(values = mapping_dict) \
+            .execute()
+
+
+# COMMAND ----------
+
+mapping_dict
+
+
+# COMMAND ----------
+
+display(src_df)
+
+# COMMAND ----------
+
+mapping_dict
 

@@ -8,7 +8,7 @@ dbutils.widgets.text("src_lob_id","AUCTION")
 dbutils.widgets.text("trg_schema_name","auction_poc")
 dbutils.widgets.text("src_schema_name","auction_poc")
 dbutils.widgets.text("mapping_directory","/dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/auction_poc")
-dbutils.widgets.text("mapping_xl_name","TestDataMappings.xlsx")
+dbutils.widgets.text("mapping_xl_name","AuctionDataMappings.xlsx")
 
 dbutils.widgets.text("job_run_id","")
 dbutils.widgets.text("task_run_id","")
