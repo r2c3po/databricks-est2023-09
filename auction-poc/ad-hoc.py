@@ -1,5 +1,24 @@
 # Databricks notebook source
 # MAGIC %sql
+# MAGIC select * from auction_poc.h_bid H_B 
+# MAGIC left outer join auction_poc.s_bid S_B using (HK_BID_ID)
+# MAGIC left outer join auction_poc.s_bid_allot S_BA on (H_B.HK_BID_ID = S_BA.HK_BID_ALLOT_ID)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select A.AUCTION_ID, I.ISIN_CD, I.MATURITY_DT  from auction_poc.l_instrument_auction L
+# MAGIC inner join auction_poc.s_instrument I on (L.HK_INSTRUMENT_ID = I.HK_INSTRUMENT_ID)
+# MAGIC inner join auction_poc.s_auction A on (L.HK_AUCTION_ID = A.HK_S_AUCTION_ID)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from hive_metastore.auction_poc.s_auction
+
+# COMMAND ----------
+
+# MAGIC %sql
 # MAGIC -- delete from auction_poc.S_ORGANIZATION
 # MAGIC -- where HK_ORGANIZATION_ID = -773927094516776116
 # MAGIC
@@ -112,10 +131,26 @@
 
 # COMMAND ----------
 
+# %sql
+# drop table hive_metastore.auction_poc.s_auction;
+# drop table hive_metastore.auction_poc.s_bid;
+# drop table hive_metastore.auction_poc.s_bid_allot;
+# drop table hive_metastore.auction_poc.s_instrument;
+# drop table hive_metastore.auction_poc.s_organization;
+
+# COMMAND ----------
+
 # MAGIC %sh
 # MAGIC cd /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/auction_poc
 # MAGIC # rm TestDataMappings.xlsx
-# MAGIC rm AuctionDataMappings.xlsx
+# MAGIC # rm AuctionDataMappings.xlsx
+# MAGIC ls
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC cd /dbfs/FileStore/shared_uploads/bolivarc@fordellconsulting.com/auction_poc/landed_files
+# MAGIC # rm AuctionResults.csv
 # MAGIC ls
 
 # COMMAND ----------

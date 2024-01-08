@@ -100,6 +100,17 @@ for trg_table in table_list:
         hk_select = "xxhash64(" + src_key_cols + ",'" + src_lob + "') as " + hk_col
         hk_src_value = "xxhash64(" + src_keys_scoped_cols + ",'" + src_lob + "')"
 
+        # Where clause to filter out nulls
+        src_cols_notnull_list = mapping.query( 
+                                    'SRC_LOB == "' + src_lob + '"' + \
+                                    ' and TRG_TABLE == "' + trg_table + \
+                                    '" and TRG_NULLABLE == False') \
+                                    ["SRC_COL"].values.tolist()
+
+        src_cols_notnull_whereclause = ''
+        if len(src_cols_notnull_list) > 0:
+            src_cols_notnull_whereclause = ' where ' + ' is not null and '.join(src_cols_notnull_list) + ' is not null '
+
         # Build the target to source mapping dictionary
         mapping_dict = {hk_col : hk_src_value}
         for x in src2trg_cols_list:
@@ -118,7 +129,7 @@ for trg_table in table_list:
         select_stmt = "with source as (" +\
                         "select distinct " + hk_select + ", " + src_select_str + \
                         " ," + "first(source.md_id) OVER (PARTITION BY " + src_key_cols + " ORDER BY md_audit_create_ts) as MD_REC_SRC_ID" +\
-                        " from " + src_schema + "." + src_table + " as source"  +\
+                        " from " + src_schema + "." + src_table + " as source " + src_cols_notnull_whereclause +\
                      ")" +\
                      "select * from source where NOT EXISTS " +\
                      "(select * from " + trg_schema + "." + trg_table + " as hub where hub."+ hk_col +" = source." + hk_col + ")"

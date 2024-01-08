@@ -102,6 +102,19 @@ for trg_table in table_list:
         hk_select = "xxhash64(" + src_key_cols + ",'" + src_lob + "') as " + hk_col
         hk_src_value = "xxhash64(" + src_keys_scoped_cols + ",'" + src_lob + "')"
 
+        # Where clause to filter out nulls
+        src_cols_notnull_list = mapping.query( 
+                                    'SRC_LOB == "' + src_lob + '"' + \
+                                    ' and TRG_TABLE == "' + trg_table + \
+                                    '" and TRG_NULLABLE == False') \
+                                    ["SRC_COL"].values.tolist()
+
+        src_cols_notnull_scoped_list = ["src."+x for x in src_cols_notnull_list]
+
+        src_cols_notnull_whereclause = ''
+        if len(src_cols_notnull_scoped_list) > 0:
+            src_cols_notnull_whereclause = ' where ' + ' is not null and '.join(src_cols_notnull_scoped_list) + ' is not null '
+            
         # Source Columns to be used in diff
         src_diff_df = mapping.sort_index().query( 
                                             'SRC_LOB == "' + src_lob + '"' + \
@@ -142,7 +155,7 @@ for trg_table in table_list:
                         ",nvl(trg.hk_compare,0) as  trg_hk_compare" +\
                         " from " + src_schema + "." + src_table + " as src "  +\
                         "inner join latest_rec_by_key latest on (src.md_id = latest.latest_md_id_by_key)" +\
-                        "left outer join " + trg_schema + "." + trg_table + " as trg on (" + hk_src_value + " = trg." + hk_col + ")" +\
+                        "left outer join " + trg_schema + "." + trg_table + " as trg on (" + hk_src_value + " = trg." + hk_col + ")" + src_cols_notnull_whereclause +\
                         ")" +\
                         " select case when hk_compare != trg_hk_compare then 0 else " + hk_col + " end as match_hk,* " +\
                         " from joined_recs where hk_compare != trg_hk_compare"
