@@ -53,7 +53,17 @@ table_list = (mapping.query('SRC_LOB == "' + src_lob + '" and TRG_TABLE_TYPE == 
 for trg_table in table_list:
     print()
     print("Target Table: " + trg_table)
-    root_name = trg_table.lstrip("S_")
+
+    # Get HUB_REF_TABLE - should only be one
+    hub_ref_tbl_nm = (mapping.query(
+        'TRG_TABLE == "' + trg_table + \
+        '" and TRG_TABLE_TYPE == "SAT"') \
+            [["HUB_REF_TABLE"]])["HUB_REF_TABLE"].unique().tolist()[0]
+    
+    hk_root_name = hub_ref_tbl_nm.lstrip("H_")
+    print("HK Root Name: " + hk_root_name)
+
+
 
     # Get Source Table
     src_table_list = (mapping.query(\
@@ -96,7 +106,7 @@ for trg_table in table_list:
         src_keys_scoped_cols = ', '.join(src_keys_scoped_list)
   
         # HK column name
-        hk_col = "HK_" + root_name + "_ID"
+        hk_col = "HK_" + hk_root_name + "_ID"
 
         # HK select clause with src_lob for multi-system uniqueness
         hk_select = "xxhash64(" + src_key_cols + ",'" + src_lob + "') as " + hk_col

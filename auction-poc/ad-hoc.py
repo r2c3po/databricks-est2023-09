@@ -1,5 +1,104 @@
 # Databricks notebook source
 # MAGIC %sql
+# MAGIC -- ORG Type 1
+# MAGIC -- select * from auction_poc.s_organization
+# MAGIC
+# MAGIC create or replace view auction_poc.D_ORGANIZATION as
+# MAGIC SELECT
+# MAGIC 	H.HK_ORGANIZATION_ID as ORGANIZATION_SKEY,  -- get HK as SKEY from HUB
+# MAGIC   H.ORGANIZATION_ID,-- get key columns from HUB
+# MAGIC   H.LOB_ID,-- get LOB columns from HUB to help understand the scope of the key columns
+# MAGIC 	S.NAME, -- list of attributes from SAT
+# MAGIC 	S.MD_LOAD_DTS as MD_ORGANIZATION_AS_OF,
+# MAGIC 	S.MD_REC_SRC as MD_ORGANIZATION_REC_SRC
+# MAGIC From auction_poc.H_ORGANIZATION H
+# MAGIC left OUTER JOIN auction_poc.S_ORGANIZATION S   
+# MAGIC   On H.HK_ORGANIZATION_ID = S.HK_ORGANIZATION_ID
+# MAGIC Where S.MD_LOAD_DTS = (select max(S2.md_load_dts) from auction_poc.S_ORGANIZATION S2
+# MAGIC                      where H.HK_ORGANIZATION_ID = S2.HK_ORGANIZATION_ID)
+# MAGIC                      ;
+# MAGIC
+# MAGIC                      
+# MAGIC
+# MAGIC
+# MAGIC
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- for every HUB: 
+# MAGIC --   derive the "hk root" and "SKEY select"
+# MAGIC --   set the "schema"
+# MAGIC --   set the "HUB table name"
+# MAGIC --   for every key column:
+# MAGIC --     derive the "key col select"
+# MAGIC
+# MAGIC --   select list of SAT tables where HUB_REF_TABLE = name of HUB
+# MAGIC --   for every SAT table (in order of spreadsheet):
+# MAGIC --      derive "select SAT attrib"
+# MAGIC --      append to "select ALL SAT Attrib"
+# MAGIC --      derive "select MD col"
+# MAGIC --      append to "select ALL MD col"
+# MAGIC --      derive "left outer join clause"
+# MAGIC --      append to "all left outer join clauses"
+# MAGIC --      derive "where clause"
+# MAGIC --      append to "all where clauses"
+# MAGIC --
+# MAGIC --   derive the select statement
+# MAGIC   -- SELECT
+# MAGIC   -- {SKEY select}
+# MAGIC   -- {key col select}
+# MAGIC   -- {select ALL SAT Attrib}
+# MAGIC   -- {select ALL MD col}
+# MAGIC   -- FROM {schema}.{HUB table name} H
+# MAGIC   -- {all left outer join clauses}
+# MAGIC   -- {all where clauses}
+# MAGIC   -- build a view from select statement
+# MAGIC   -- create or replace view D_{hk root}
+# MAGIC
+# MAGIC SELECT
+# MAGIC  H.HK_BID_ID as BID_SKEY, -- get HK as SKEY from HUB derive from hk root
+# MAGIC  H.AUCTION_ID, -- get key columns from HUB
+# MAGIC  H.ORGANIZATION_ID,
+# MAGIC  H.ISIN_CD,
+# MAGIC  H.MATURITY_DT,
+# MAGIC  H.BID_DTS,
+# MAGIC  H.BID_RATE,
+# MAGIC  H.LOB_ID,
+# MAGIC  S.BID_AMT,  -- Main SAT
+# MAGIC  S.FINAL_IND, -- Main SAT
+# MAGIC  SBA.BID_ALLOTTED_AMT, -- Second SAT 
+# MAGIC  S.MD_LOAD_DTS as MD_BID_AS_OF, -- Main SAT
+# MAGIC  S.MD_REC_SRC as MD_BID_REC_SRC, -- Main SAT
+# MAGIC  SBA.MD_LOAD_DTS as MD_BID_ALLOT_AS_OF, -- Second SAT
+# MAGIC  SBA.MD_REC_SRC as MD_BID_ALLOT_REC_SRC -- Second SAT
+# MAGIC FROM auction_poc.H_BID H
+# MAGIC
+# MAGIC LEFT OUTER JOIN auction_poc.S_BID S -- Main SAT
+# MAGIC  USING (HK_BID_ID)
+# MAGIC
+# MAGIC LEFT OUTER JOIN auction_poc.S_BID_ALLOT SBA -- Second SAT
+# MAGIC  USING (HK_BID_ID)
+# MAGIC
+# MAGIC WHERE S.MD_LOAD_DTS = (select max(S2.md_load_dts) from auction_poc.S_BID S2 -- Main SAT
+# MAGIC                      where H.HK_BID_ID = S2.HK_BID_ID) 
+# MAGIC
+# MAGIC AND SBA.MD_LOAD_DTS = (select max(S2.md_load_dts) from auction_poc.S_BID_ALLOT S2 -- Second SAT
+# MAGIC                      where H.HK_BID_ID = S2.HK_BID_ID)                      
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT
+# MAGIC                 HK_BID_ID as BID_SKEY,
+# MAGIC                 H.AUCTION_ID, H.ORGANIZATION_ID, H.ISIN_CD, H.MATURITY_DT, H.BID_DTS, H.BID_RATE
+# MAGIC                 FROM auction_poc.H_BID H
+
+# COMMAND ----------
+
+# MAGIC %sql
 # MAGIC select * from auction_poc.h_bid H_B 
 # MAGIC left outer join auction_poc.s_bid S_B using (HK_BID_ID)
 # MAGIC left outer join auction_poc.s_bid_allot S_BA on (H_B.HK_BID_ID = S_BA.HK_BID_ALLOT_ID)

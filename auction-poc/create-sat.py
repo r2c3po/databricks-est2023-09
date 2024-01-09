@@ -37,8 +37,16 @@ for trg_table in table_list:
     print()
     print("Target Table: " + trg_table)
     
-    root_name = trg_table.lstrip("S_")
-    print("Root Name: " + root_name)
+    
+
+    # Get HUB_REF_TABLE - should only be one
+    hub_ref_tbl_nm = (mapping.query(
+        'TRG_TABLE == "' + trg_table + \
+        '" and TRG_TABLE_TYPE == "SAT"') \
+            [["HUB_REF_TABLE"]])["HUB_REF_TABLE"].unique().tolist()[0]
+    
+    hk_root_name = hub_ref_tbl_nm.lstrip("H_")
+    print("HK Root Name: " + hk_root_name)
 
     # Get list of ALL columns in proper order
     #TODO need to change name from BUSKEY_ORDER to COL_ORDER
@@ -59,7 +67,7 @@ for trg_table in table_list:
 
     DeltaTable.createIfNotExists(spark) \
     .tableName(trg_schema + "." + trg_table) \
-    .addColumn("HK_" + root_name + "_ID", "bigint") \
+    .addColumn("HK_" + hk_root_name + "_ID", "bigint") \
     .addColumns(trg_schema_struct) \
     .addColumn("HK_COMPARE", "bigint") \
     .addColumn("LOB_ID", "string") \
@@ -84,4 +92,7 @@ for trg_table in table_list:
 # %sql
 # drop table auction_poc.S_ORGANIZATION;
 # drop table auction_poc.S_INSTRUMENT;
+# drop table hive_metastore.auction_poc.s_auction;
+# drop table hive_metastore.auction_poc.s_bid;
+# drop table hive_metastore.auction_poc.s_bid_allot;
 
